@@ -1,0 +1,12 @@
+v {xschem version=3.4.6RC file_version=1.2
+}
+G {}
+K {type=transmission_line
+format="@name @@nap @nam @@nbp @nbm z0=@z0 td=@td"
+template="name=T1 nam=VGND nbm=VGND z0=50 td=10n"}
+V {}
+S {}
+E {}
+L 4 0 0 1 0 {}
+B 5 -0.25 -0.25 0.25 0.25 {name=nap dir=in}
+B 5 0.75 -0.25 1.25 0.25 {name=nbp dir=out}
