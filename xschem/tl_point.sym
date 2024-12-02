@@ -1,9 +1,9 @@
 v {xschem version=3.4.6RC file_version=1.2
 }
 G {}
-K {type=transmission_line
-format="@name @@nap @nam @@nbp @nbm z0=@z0 td=@td"
-template="name=T1 nam=VGND nbm=VGND z0=50 td=10n"}
+K {type=kspice_transmission_line
+format="@name @@nap @@nbp @gnd urcmod l=@l"
+template="name=O1 nam=VGND nbm=VGND l=1u"}
 V {}
 S {}
 E {}
