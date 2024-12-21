@@ -105,6 +105,15 @@ class Xschem3D:
             if os.path.exists(cached_file):
                 os.remove(cached_file)
 
+    def cached_svg_file(self):
+        extensionless_name, _ = os.path.splitext(self.cached_schematic_file())
+        return os.path.join(extensionless_name + '.svg')
+
+    def generate_svg(self):
+        xschem_rcfile = os.path.join(os.getenv('PDK_ROOT'), 'sky130A/libs.tech/xschem/xschemrc')
+        subprocess.run(f"SVG_NAME=\"{self.cached_svg_file()}\" SCH_NAME=\"{self.cached_schematic_file()}\" xschem --rcfile={xschem_rcfile} --no_x --script xschem/generate_svg.tcl --log \"{self.cached_svg_file()}.log\"", text=True, shell=True)
+
+
     def convert_time(t):
         si_prefixes = {
             't': 1.0e12,
@@ -236,7 +245,7 @@ class Xschem3D:
             xschem exit closewindow force
             """
 
-        subprocess.run(f"xschem --rcfile={xschem_rcfile}", input=commands, text=True, shell=True)
+        subprocess.run(f"xschem --rcfile={xschem_rcfile} --no_x", input=commands, text=True, shell=True)
 
 
     def cached_sim_file(self):
@@ -301,7 +310,6 @@ class Xschem3D:
             file.write(f'\n')
             file.write(f'.control\n')
             file.write(f'    tran {self.time_precision} {self.tran_end_time()}\n')
-            file.write(f'    display\n')
             file.write(f'    wrdata {self.cached_ports_simdata_file()} {" ".join(self.all_ports())}\n')
             if self.to_split:
                 file.write(f'    wrdata {self.cached_splits_simdata_file()} {" ".join(self.nets_connected_to_splitters())}\n')
@@ -447,7 +455,7 @@ class Xschem3D:
             assert((net1_time == net2_time).all())
             avg_voltages = np.average([net1_voltages, net2_voltages], axis=0)
 
-            coordinates_key = f"({splitter_info[tl]['coordinates'][0]}, {splitter_info[tl]['coordinates'][1]})"
+            coordinates_key = f"({splitter_info[tl]['coordinates'][0]}, {-splitter_info[tl]['coordinates'][1]})"
             coordinate_voltages[coordinates_key] = {"time": net1_time.tolist(), "voltages": avg_voltages.tolist()}
 
         with open(self.cached_coordinate_voltages_file(), 'w') as json_file:
@@ -463,4 +471,5 @@ if __name__=='__main__':
         stimulus_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim",
         to_split=True)
     dfxtp.generate_coordinate_voltages_file()
-    dfxtp.plot_ports()
+    # dfxtp.plot_ports()
+    dfxtp.generate_svg()
