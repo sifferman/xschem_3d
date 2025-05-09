@@ -19,12 +19,12 @@ Here is a SKY130 Flip-Flop being simulated. You can see the two latches being up
     * Installation instructions: <https://github.com/sifferman/sky130_schematics/blob/7aa3f386/.github/workflows/build-and-release.yml#L40-L55>
 * Xschem
     * Installaion instructions: <https://github.com/sifferman/sky130_schematics/blob/7aa3f386/.github/workflows/build-and-release.yml#L60-L64>
-* Volare
+* SKY130 PDK Via Ciel
     ```bash
-    python3 -m venv volare-venv
-    volare-venv/bin/python3 -m pip install --upgrade --no-cache-dir volare
-    export PDK_ROOT=${{ env.tools }}/volare-pdks
-    volare-venv/bin/volare enable 0fe599b2afb6708d281543108caf8310912f54af
+    python3 -m venv ciel-venv
+    ciel-venv/bin/python3 -m pip install --upgrade --no-cache-dir ciel
+    export PDK_ROOT=$TOOLS/ciel-pdks
+    ciel-venv/bin/ciel enable --pdk sky130 0fe599b2afb6708d281543108caf8310912f54af
     ```
 
 ## Running
