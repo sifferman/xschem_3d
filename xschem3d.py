@@ -2,17 +2,63 @@
 import re
 import os
 import subprocess
-import math
-import shutil
-import hashlib
 
 import numpy as np
 import matplotlib.pyplot as plt
 import json
 
+import re
+from collections import OrderedDict
+from typing import Dict, List, Tuple, Any
+
 
 class Xschem3D:
     WIRE_REGEX = r'N\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+\{.+\}'
+    cell_instance_name = "X1"
+
+
+    def sch2nets(self):
+        wire_pattern = re.compile(
+            r"^N\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+\{lab=#?([^}]+)\}$"
+        )
+        port_pattern = re.compile(
+            r"^C\s+\{(ipin|opin)\.sym\}\s+-?\d+\s+-?\d+\s+-?\d+\s+-?\d+\s+\{name=[^ ]+\s+lab=([^}]+)\}$"
+        )
+        power_ports = {"VGND", "VNB", "VPB", "VPWR"}
+
+        nets = OrderedDict()
+
+        # First pass: record port nets in file order
+        with open(self.schematic_filename, 'r') as f:
+            for line in f:
+                m = port_pattern.match(line.strip())
+                if m:
+                    pin_type, label = m.groups()
+                    if label not in nets:
+                        nets[label] = {'voltages': [], 'wires': [], 'nettype': 'internal'}
+
+                    if label in power_ports:
+                        nets[label]['nettype'] = 'power'
+                    elif pin_type == 'ipin':
+                        nets[label]['nettype'] = 'input_port'
+                    elif pin_type == 'opin':
+                        nets[label]['nettype'] = 'output_port'
+                    else:
+                        raise ValueError(f"Unknown pin type '{pin_type}' for net '{label}'")
+
+        # Second pass: record wire nets in file order, creating new entries if needed
+        with open(self.schematic_filename, 'r') as f:
+            for line in f:
+                m = wire_pattern.match(line.strip())
+                if m:
+                    x1, y1, x2, y2, label = m.groups()
+                    if label not in nets:
+                        nets[label] = {'voltages': [], 'wires': [], 'nettype': 'internal'}
+                    coords = (int(x1), int(y1), int(x2), int(y2))
+                    nets[label]['wires'].append(coords)
+
+        return nets
+
 
     def __init__(self, schematic_filename, stimulus_filename, pdk="sky130A", build_dir="build",
                  time_precision='0.01ns', vdd=1.8, trisefall=20e-12):
@@ -25,6 +71,7 @@ class Xschem3D:
         self.time_precision = time_precision
         self.vdd = vdd
         self.trisefall = trisefall
+        self.nets = self.sch2nets()
 
     def schematic_basename(self):
         return os.path.basename(self.schematic_filename)
@@ -80,23 +127,27 @@ class Xschem3D:
 
 
     def simdata_filename(self):
-        return os.path.join(self.build_dir, "ports.txt")
+        return os.path.join(self.build_dir, "simdata.txt")
 
-    def input_ports(self):
-        return [port for port in self.all_ports() if port not in self.power_ports() and port not in self.output_ports()]
+    def input_ports(self) -> List[str]:
+        return [n for n, info in self.nets.items() if info['nettype'] == 'input_port']
 
-    def output_ports(self):
-        with open(self.schematic_filename, 'r') as file:
-            lines = file.readlines()
-            return [re.search(r"lab=([^}]+)", line).group(1) for line in lines if "{opin.sym}" in line]
+    def output_ports(self) -> List[str]:
+        return [n for n, info in self.nets.items() if info['nettype'] == 'output_port']
 
-    def power_ports(self):
-        return ["VGND", "VNB", "VPB", "VPWR"]
+    def power_ports(self) -> List[str]:
+        return [n for n, info in self.nets.items() if info['nettype'] == 'power']
 
-    def all_ports(self):
-        with open(self.schematic_filename, 'r') as file:
-            lines = file.readlines()
-            return [re.search(r"lab=([^}]+)", line).group(1) for line in lines if "{ipin.sym}" in line or "{opin.sym}" in line]
+    def all_ports(self) -> List[str]:
+        return [n for n, info in self.nets.items() if info['nettype'] in {'input_port', 'output_port', 'power'}]
+
+    def internal_nets(self) -> List[str]:
+        return [n for n, info in self.nets.items() if info['nettype'] == 'internal']
+
+    def ngspice_formatted_net_names(self) -> List[str]:
+        out = self.all_ports()
+        out.extend(f"{self.cell_instance_name}.{net}" for net in self.internal_nets())
+        return out
 
     def timestring2float(t):
         si_prefixes = {
@@ -161,11 +212,11 @@ class Xschem3D:
             for idx, port in enumerate(self.input_ports(), start=1):
                 file.write(f'a_dac_bridge{idx} [{port}_DIGITAL] [{port}] dac_model\n')
             file.write(f'\n')
-            file.write(f'X1 {" ".join(self.all_ports())} {model_name}\n')
+            file.write(f'{Xschem3D.cell_instance_name} {" ".join(self.all_ports())} {model_name}\n')
             file.write(f'\n')
             file.write(f'.control\n')
             file.write(f'    tran {self.time_precision} {self.tran_end_time()}\n')
-            file.write(f'    wrdata {self.simdata_filename()} {" ".join(self.all_ports())}\n')
+            file.write(f'    wrdata {self.simdata_filename()} {" ".join(self.ngspice_formatted_net_names())}\n')
             file.write(f'    exit\n')
             file.write(f'.endc\n')
             file.write(f'\n')
@@ -181,13 +232,16 @@ class Xschem3D:
         self.generate_netlist()
         self.generate_testbench()
         subprocess.run(
-            f"export PDK={self.pdk} && export SKYWATER_MODELS={Xschem3D.skywater_models(self.pdk)} && ngspice {self.testbench_filename()} {self.netlist_filename()}",
+            f"""
+            SKYWATER_MODELS={Xschem3D.skywater_models(self.pdk)} \
+            ngspice {self.testbench_filename()} {self.netlist_filename()}
+            """,
             shell=True,
             check=True
         )
 
 
-    def parse_simdata_file(self, filename):
+    def parse_simdata_file(filename):
         times = []
         datasets = []
 
@@ -202,24 +256,59 @@ class Xschem3D:
         return np.array(times).T, np.array(datasets).T
 
 
+    def _prune_redundant(voltage_pairs):
+        if len(voltage_pairs) < 3:
+            return voltage_pairs
+        out = [voltage_pairs[0]]
+        last_added_t, last_added_v = out[0]
+
+        for i in range(1, len(voltage_pairs)-1):
+            curr_t, curr_v = voltage_pairs[i]
+            next_t, next_v = voltage_pairs[i+1]
+            if not (last_added_v == curr_v == next_v):
+                out.append(voltage_pairs[i])
+                last_added_t, last_added_v = curr_t, curr_v
+
+        out.append(voltage_pairs[-1])
+        return out
+
+
+    def fill_net_voltages_from_simdata(self):
+        formatted_nets = self.ngspice_formatted_net_names()
+        times, voltages = Xschem3D.parse_simdata_file(self.simdata_filename())
+        for i, label in enumerate(formatted_nets):
+            # remove instance name
+            while '.' in label:
+                label = label.split('.', 1)[1]
+            self.nets[label]['voltages'] = Xschem3D._prune_redundant(list(zip(times[i], voltages[i])))
+
+
     def plot_ports(self):
-        self.generate_simdata_files()
-
         plt.figure(figsize=(10, 6))
-
-        all_ports = self.all_ports()
-        times, datasets = self.parse_simdata_file(self.simdata_filename())
-        for i, (time, data) in enumerate(zip(times, datasets)):
-            if all_ports[i] not in self.power_ports():
-                plt.plot(time, data, label=all_ports[i])
+        for net, info in self.nets.items():
+            if info['nettype'] in {'input_port', 'output_port'}:
+                if not info['voltages']:
+                    continue
+                times, volts = zip(*info['voltages'])
+                plt.plot(times, volts, label=net)
 
         plt.xlabel("Time (s)")
         plt.ylabel("Voltage (V)")
-        plt.title("Time vs Voltage")
+        plt.title("Net Voltages")
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
         plt.show()
+
+
+    def export_json(self, json_filename=None):
+        if json_filename is None:
+            json_filename = os.path.join(self.build_dir, 'nets.json')
+
+        json.dump(self.nets,
+                  open(json_filename,'w'),
+                  default=lambda o: o.tolist() if hasattr(o, 'tolist') else o,
+                  indent=2)
 
 
 if __name__=='__main__':
@@ -227,4 +316,7 @@ if __name__=='__main__':
         schematic_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.sch",
         stimulus_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim")
     dfxtp.generate_svg()
+    dfxtp.generate_simdata_files()
+    dfxtp.fill_net_voltages_from_simdata()
+    dfxtp.export_json()
     dfxtp.plot_ports()
