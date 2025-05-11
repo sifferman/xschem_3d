@@ -312,11 +312,20 @@ class Xschem3D:
 
 
 if __name__=='__main__':
-    dfxtp = Xschem3D(
-        schematic_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.sch",
-        stimulus_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim")
-    dfxtp.generate_svg()
-    dfxtp.generate_simdata_files()
-    dfxtp.fill_net_voltages_from_simdata()
-    dfxtp.export_json()
-    dfxtp.plot_ports()
+    # dfxtp = Xschem3D(
+    #     schematic_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.sch",
+    #     stimulus_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim")
+    # dfxtp.generate_svg()
+    # dfxtp.generate_simdata_files()
+    # dfxtp.fill_net_voltages_from_simdata()
+    # dfxtp.export_json()
+    # dfxtp.plot_ports()
+
+    ro = Xschem3D(
+        schematic_filename="examples/ro/ro.sch",
+        stimulus_filename="examples/ro/ro.stim")
+    ro.generate_svg()
+    ro.generate_simdata_files()
+    ro.fill_net_voltages_from_simdata()
+    ro.export_json()
+    ro.plot_ports()
