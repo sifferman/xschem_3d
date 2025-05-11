@@ -60,6 +60,39 @@ class Xschem3D:
         return nets
 
 
+    def sch2fets(self):
+        symbol_pattern = re.compile(
+            r"^C\s+\{(.+?)\}\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+\{([\s\S]*?)\}$",
+            re.MULTILINE
+        )
+
+        with open(self.schematic_filename, 'r') as f:
+            content = f.read()
+
+        fets = []
+        for match in symbol_pattern.finditer(content):
+            symbol_name = match.group(1)
+            x_coord     = int(match.group(2))
+            y_coord     = int(match.group(3))
+            rotate      = int(match.group(4))
+            flip        = int(match.group(5))
+            if 'pfet' in symbol_name.lower():
+                fettype = 'pfet'
+            elif 'nfet' in symbol_name.lower():
+                fettype = 'nfet'
+            else:
+                continue
+            fet = {
+                'type':              fettype,
+                'location':          [x_coord, y_coord],
+                'rotate_clockwise':  90 * rotate,
+                'flip':              bool(flip),
+                'currents':          []
+            }
+            fets.append(fet)
+        return fets
+
+
     def __init__(self, schematic_filename, stimulus_filename, pdk="sky130A", build_dir="build",
                  time_precision='0.01ns', vdd=1.8, trisefall=20e-12):
         self.schematic_filename = schematic_filename
@@ -72,6 +105,7 @@ class Xschem3D:
         self.vdd = vdd
         self.trisefall = trisefall
         self.nets = self.sch2nets()
+        self.fets = self.sch2fets()
 
     def schematic_basename(self):
         return os.path.basename(self.schematic_filename)
@@ -303,9 +337,13 @@ class Xschem3D:
 
     def export_json(self, json_filename=None):
         if json_filename is None:
-            json_filename = os.path.join(self.build_dir, 'nets.json')
+            json_filename = os.path.join(self.build_dir, 'circuit.json')
 
-        json.dump(self.nets,
+        circuit = {
+            'nets': self.nets,
+            'fets': self.fets
+        }
+        json.dump(circuit,
                   open(json_filename,'w'),
                   default=lambda o: o.tolist() if hasattr(o, 'tolist') else o,
                   indent=2)

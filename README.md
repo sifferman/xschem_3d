@@ -31,5 +31,5 @@ Here is a SKY130 Flip-Flop being simulated. You can see the two latches being up
 
 ```bash
 python3 xschem3d.py
-blender --python blender_animate.py -- build/nets.json build/ro.svg
+blender --python blender_animate.py -- build/circuit.json
 ```

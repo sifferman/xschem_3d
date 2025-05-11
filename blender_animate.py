@@ -55,7 +55,8 @@ def create_symbol_node_group(thickness, yscale):
     return ng
 
 
-def add_symbol(svg_path, scale, location, node_group):
+def add_symbol(svg_path, scale, location, node_group, rotate_clockwise, flip):
+
     # Build absolute path
     if not os.path.isabs(svg_path):
         absolute_svg_path = os.path.join(os.getcwd(), svg_path)
@@ -65,8 +66,14 @@ def add_symbol(svg_path, scale, location, node_group):
     # Import SVG as grease pencil
     bpy.ops.wm.grease_pencil_import_svg(filepath=absolute_svg_path)
     obj = bpy.context.object
-    obj.location = (location[0], location[1], 0)
-    obj.scale = (scale, scale, scale)
+
+    obj.location = (location[0], -location[1], 0)
+    obj.scale = (
+        -scale if flip else scale,
+        scale,
+        scale
+    )
+    obj.rotation_euler.z = -math.radians(rotate_clockwise)
 
     # Lie flat
     obj.rotation_euler.x = -math.pi / 2
@@ -146,13 +153,10 @@ def generate_blender_project(nets_json, voltage_scalar, time_scalar):
 
     ng = create_symbol_node_group(thickness=40, yscale=8)
 
-    # Temporarily add PFET symbol for testing
-    add_symbol(svg_path='blender/pfet.svg', scale=450, location=(-53, 88), node_group=ng)
-
     with open(nets_json, 'r') as f:
         data = json.load(f)
 
-    for label, info in data.items():
+    for label, info in data['nets'].items():
         if not info.get('wires') or not info.get('voltages'):
             continue
         times, volts = zip(*info['voltages'])
@@ -163,9 +167,15 @@ def generate_blender_project(nets_json, voltage_scalar, time_scalar):
                      voltage_scalar=voltage_scalar,
                      time_scalar=time_scalar)
 
+    for fet in data['fets']:
+        add_symbol(svg_path=f'blender/{fet.get("type")}.svg',
+                   scale=450, location=fet.get('location'),
+                   node_group=ng, rotate_clockwise=fet.get('rotate_clockwise'),
+                   flip=fet.get('flip'))
+
     enable_fog_glow()
 
 
 if __name__ == '__main__':
     nets_json = sys.argv[-1]
-    generate_blender_project(nets_json, voltage_scalar=1.0, time_scalar=1e9)
+    generate_blender_project(nets_json, voltage_scalar=3.0, time_scalar=5e9)
