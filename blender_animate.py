@@ -4,6 +4,7 @@ import sys
 import mathutils
 import math
 import os
+from bisect import bisect_right
 
 
 def reset_scene():
@@ -93,32 +94,54 @@ def create_fet_material(currents, gatebody_percentages, current_scalar, time_sca
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
 
-    for node in list(nodes):
-        nodes.remove(node)
+    for n in nodes:
+        nodes.remove(n)
 
-    output = nodes.new(type='ShaderNodeOutputMaterial')
-    output.location = (400, 0)
+    out = nodes.new(type='ShaderNodeOutputMaterial')
+    bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+    bsdf.location = -200, 0
+    links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
 
-    emission = nodes.new(type='ShaderNodeEmission')
-    emission.location = (200, 0)
-    emission.inputs['Color'].default_value = (0, 0, 0, 1) # black
-    emission.inputs['Strength'].default_value = 0.0
-    links.new(emission.outputs['Emission'], output.inputs['Surface'])
+    times_red = [t for t,_ in currents]
+    vals_red = [v*current_scalar for _,v in currents]
+    times_gb = [t for t,_ in gatebody_percentages]
+    vals_gb = [v for _,v in gatebody_percentages]
+    all_times = sorted(set(times_red + times_gb))
 
     fps = bpy.context.scene.render.fps
-    for t, curr in currents:
-        frame = int(t * time_scalar * fps)
-        red_val = min(abs(curr * current_scalar), 1.0)
-        glow_strength = curr * current_scalar * 10.0
 
-        emission.inputs['Color'].default_value[0] = red_val
-        emission.inputs['Color'].keyframe_insert(data_path='default_value', frame=frame, index=0) # red
+    def red_value(t):
+        if t <= times_red[0]:
+            return vals_red[0]
+        elif t >= times_red[-1]:
+            return vals_red[-1]
+        else:
+            idx = bisect_right(times_red, t)
+            return vals_red[idx]
 
-        emission.inputs['Strength'].default_value = glow_strength
-        emission.inputs['Strength'].keyframe_insert(data_path='default_value', frame=frame)
+    def green_value(t):
+        if t <= times_gb[0]:
+            gb = vals_gb[0]
+        elif t >= times_gb[-1]:
+            gb = vals_gb[-1]
+        else:
+            idx = bisect_right(times_gb, t)
+            gb = vals_gb[idx]
+        threshold_percent = 0.3
+        dimmer = 0.6
+        return (1.0 - dimmer) * max(gb - 3*red_value(t) - threshold_percent, 0.0) / (1.0 - threshold_percent)
 
-        if frame > bpy.context.scene.frame_end:
-            bpy.context.scene.frame_end = frame
+    for t in all_times:
+        frame = t * time_scalar * fps
+
+        r = red_value(t)
+        g = green_value(t)
+
+        r = min(max(r, 0.0), 1.0)
+        g = min(max(g, 0.0), 1.0)
+
+        bsdf.inputs['Base Color'].default_value = (r, g, 0.0, 1.0)
+        bsdf.inputs['Base Color'].keyframe_insert(data_path='default_value', frame=frame)
 
     return mat
 
@@ -217,4 +240,4 @@ def generate_blender_project(nets_json, voltage_scalar, current_scalar, time_sca
 
 if __name__ == '__main__':
     nets_json = sys.argv[-1]
-    generate_blender_project(nets_json, voltage_scalar=3.0, current_scalar=1e3, time_scalar=5e9)
+    generate_blender_project(nets_json, voltage_scalar=3.0, current_scalar=5e3, time_scalar=5e9)
