@@ -1,15 +1,27 @@
 *     CLK D
-0.0ns 1s  1s
-0.1ns 0s  1s
-0.2ns 0s  0s
-0.3ns 0s  0s
-0.4ns 1s  0s
-0.5ns 1s  0s
-0.6ns 1s  0s
-0.7ns 0s  0s
-0.8ns 0s  1s
-0.9ns 0s  1s
-1.0ns 1s  1s
-1.1ns 1s  1s
-1.2ns 1s  1s
-2.0ns 1s  1s
+* negedge
+0.0ns  0s  0s
+
+* posedge
+0.5ns  1s  0s
+0.6ns  1s  1s
+
+* negedge
+1.0ns  0s  1s
+
+* posedge
+1.5ns  1s  1s
+1.6ns  1s  0s
+
+* negedge
+2.0ns  0s  0s
+
+* posedge
+2.5ns  1s  0s
+2.6ns  1s  1s
+
+* negedge
+3.0ns  0s  0s
+
+* posedge
+3.5ns  1s  1s

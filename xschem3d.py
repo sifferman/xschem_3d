@@ -1,6 +1,6 @@
 
 import re
-import os
+import os, sys
 import subprocess
 
 import numpy as np
@@ -96,7 +96,7 @@ class Xschem3D:
                 fettype = 'nfet'
             else:
                 continue
-            model_name = symbol_path.split('.sym')[0].replace('/', '__')
+            model_name = f"{symbol_path.split('/')[0]}__{parameters['model']}"
             fet = {
                 'name':                f'{parameters["spiceprefix"]}{parameters["name"]}',
                 'type':                fettype,
@@ -352,20 +352,30 @@ class Xschem3D:
                   indent=2)
 
 
-if __name__=='__main__':
-    # dfxtp = Xschem3D(
-    #     schematic_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.sch",
-    #     stimulus_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim")
-    # dfxtp.generate_svg()
-    # dfxtp.generate_simdata_files()
-    # dfxtp.load_simdata()
-    # dfxtp.export_json()
-    # dfxtp.plot_ports()
+if __name__ == '__main__':
+    if len(sys.argv) != 4:
+        print("Error: Incorrect number of arguments.")
+        print(f"Usage: python3 {sys.argv[0]} <schematic_filename> <stimulus_filename> <build_dir>")
+        sys.exit(1)
 
-    ro = Xschem3D(
-        schematic_filename="examples/ro/ro.sch",
-        stimulus_filename="examples/ro/ro.stim")
-    ro.generate_simdata_files()
-    ro.load_simdata()
-    ro.export_json()
-    ro.plot_ports()
+    schematic_filename = sys.argv[1]
+    stimulus_filename = sys.argv[2]
+    build_dir = sys.argv[3]
+
+    if not os.path.isfile(schematic_filename):
+        print(f"Error: Schematic file '{schematic_filename}' does not exist.")
+        sys.exit(1)
+
+    if not os.path.isfile(stimulus_filename):
+        print(f"Error: Stimulus file '{stimulus_filename}' does not exist.")
+        sys.exit(1)
+
+    circuit = Xschem3D(
+        schematic_filename=schematic_filename,
+        stimulus_filename=stimulus_filename,
+        build_dir=build_dir)
+
+    circuit.generate_simdata_files()
+    circuit.load_simdata()
+    circuit.export_json()
+    # circuit.plot_ports()

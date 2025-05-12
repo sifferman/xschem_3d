@@ -1,13 +1,17 @@
 
 # 3D Circuit Simulation Visualizer
 
-This project aims to create visual representations of voltage propogating through analog circuits.
+This project aims to create visual representations of voltage propogating through analog circuits. It uses Ngspice, Xschem, and Blender.
 
 ## Demonstration
 
-Here is a SKY130 Flip-Flop being simulated. You can see the two latches being updated with clock signal on the top.
+Here is a Ring Oscillator being simulated. You can see the voltage propagate through each of the inverters. When a wire has a voltage, it gets bigger; when a FET has current, it turns red.
 
-![DFF Demo](docs/demo.gif)
+![Ring Oscillator Demo](docs/ro.gif)
+
+Here is a D-Flip-Flop being simulated. You can see the voltage propagate as the clock changes.
+
+![D-Flip-Flop Demo](docs/dfxtp.gif)
 
 ## Dependencies
 
@@ -30,6 +34,15 @@ Here is a SKY130 Flip-Flop being simulated. You can see the two latches being up
 ## Running
 
 ```bash
-python3 xschem3d.py
-blender --python blender_animate.py -- build/circuit.json
+# Open schematics with
+xschem --rcfile $PDK_ROOT/sky130A/libs.tech/xschem/xschemrc examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.sch
+xschem --rcfile $PDK_ROOT/sky130A/libs.tech/xschem/xschemrc examples/ro/ro.sch
+
+# Run ring oscillator example with
+python3 xschem3d.py examples/ro/ro.sch examples/ro/ro.stim build.ro
+blender --python blender_animate.py -- build.ro/circuit.json
+
+# Run DFF example with
+python3 xschem3d.py examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.sch examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim build.dfxtp
+blender --python blender_animate.py -- build.dfxtp/circuit.json
 ```

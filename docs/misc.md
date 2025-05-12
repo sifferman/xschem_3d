@@ -1,6 +1,12 @@
 
 # Miscellaneous Notes
 
+## FFMPEG GIF
+
+```bash
+ffmpeg -i input.mkv -vf "fps=10,scale=720:-1:flags=lanczos" -c:v gif output.gif
+```
+
 ## Digital Source
 
 For the [Digital Source](https://ngspice.sourceforge.io/docs/ngspice-html-manual/manual.xhtml#subsec_Digital_Source) model, there is poor documentation for the `".stim"` file format. Here is a guide created by looking at the source code.
