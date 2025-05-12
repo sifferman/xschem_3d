@@ -16,7 +16,7 @@ def reset_scene():
     bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
 
 
-def create_symbol_node_group(thickness, yscale, times, currents, current_scalar, time_scalar):
+def create_symbol_node_group(thickness, yscale, currents, gatebody_percentages, current_scalar, time_scalar):
     bpy.ops.mesh.primitive_cube_add()
     temp_obj = bpy.context.object
     bpy.ops.object.modifier_add(type='NODES')
@@ -45,7 +45,7 @@ def create_symbol_node_group(thickness, yscale, times, currents, current_scalar,
 
     set_mat = ng.nodes.new('GeometryNodeSetMaterial')
     set_mat.location = (300, -100)
-    set_mat.inputs['Material'].default_value = create_fet_material(times, currents, current_scalar, time_scalar)
+    set_mat.inputs['Material'].default_value = create_fet_material(currents, gatebody_percentages, current_scalar, time_scalar)
 
     links = ng.links
     links.new(group_in.outputs["Geometry"], c2m.inputs["Curve"])
@@ -59,7 +59,7 @@ def create_symbol_node_group(thickness, yscale, times, currents, current_scalar,
     return ng
 
 
-def add_symbol(svg_path, scale, location, rotate_clockwise, flip, thickness, yscale, times, currents, current_scalar, time_scalar):
+def add_symbol(svg_path, scale, location, rotate_clockwise, flip, thickness, yscale, currents, gatebody_percentages, current_scalar, time_scalar):
     if not os.path.isabs(svg_path):
         absolute_svg_path = os.path.join(os.getcwd(), svg_path)
     else:
@@ -80,14 +80,14 @@ def add_symbol(svg_path, scale, location, rotate_clockwise, flip, thickness, ysc
     # Lie flat
     obj.rotation_euler.x = -math.pi / 2
 
-    node_group = create_symbol_node_group(thickness, yscale, times, currents, current_scalar, time_scalar)
+    node_group = create_symbol_node_group(thickness, yscale, currents, gatebody_percentages, current_scalar, time_scalar)
     geo_mod = obj.modifiers.new(name="SymbolNodes", type='NODES')
     geo_mod.node_group = node_group
 
     return obj
 
 
-def create_fet_material(times, currents, current_scalar, time_scalar):
+def create_fet_material(currents, gatebody_percentages, current_scalar, time_scalar):
     mat = bpy.data.materials.new(name="FetMaterial")
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
@@ -106,7 +106,7 @@ def create_fet_material(times, currents, current_scalar, time_scalar):
     links.new(emission.outputs['Emission'], output.inputs['Surface'])
 
     fps = bpy.context.scene.render.fps
-    for t, curr in zip(times, currents):
+    for t, curr in currents:
         frame = int(t * time_scalar * fps)
         red_val = min(abs(curr * current_scalar), 1.0)
         glow_strength = curr * current_scalar * 10.0
@@ -134,7 +134,7 @@ def create_wire_material(obj):
     return mat
 
 
-def add_wire(net_name, start, end, times, voltages, voltage_scalar, time_scalar):
+def add_wire(net_name, start, end, voltages, voltage_scalar, time_scalar):
     vec = mathutils.Vector(end) - mathutils.Vector(start)
     length = vec.length
 
@@ -158,7 +158,7 @@ def add_wire(net_name, start, end, times, voltages, voltage_scalar, time_scalar)
     wire.data.materials.append(mat)
 
     fps = bpy.context.scene.render.fps
-    for t, v in zip(times, voltages):
+    for t, v in voltages:
         frame = int(t * time_scalar * fps)
         radius = max(v * voltage_scalar, 0)
         wire.scale.x = radius
@@ -194,22 +194,22 @@ def generate_blender_project(nets_json, voltage_scalar, current_scalar, time_sca
     for label, info in data['nets'].items():
         if not info.get('wires') or not info.get('voltages'):
             continue
-        times, voltages = zip(*info['voltages'])
+        voltages = info['voltages']
         for x1, y1, x2, y2 in info['wires']:
             start = (x1, -y1, 0)
             end = (x2, -y2, 0)
-            add_wire(label, start, end, times, voltages,
+            add_wire(label, start, end, voltages,
                      voltage_scalar=voltage_scalar,
                      time_scalar=time_scalar)
 
     for fet in data['fets']:
-        times, currents = zip(*fet['currents'])
+        currents = fet['currents']
         add_symbol(svg_path=f'blender/{fet.get("type")}.svg',
                    scale=450, location=fet.get('location'),
                    rotate_clockwise=fet.get('rotate_clockwise'),
                    flip=fet.get('flip'),
                    thickness=40, yscale=8,
-                   times=times, currents=currents,
+                   gatebody_percentages=fet.get('gatebody_percentages'), currents=currents,
                    current_scalar=current_scalar, time_scalar=time_scalar)
 
     enable_fog_glow()

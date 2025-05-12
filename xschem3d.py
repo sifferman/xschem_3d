@@ -99,12 +99,14 @@ class Xschem3D:
             model_name = f"{symbol_path.split('/')[0]}__{parameters['model']}"
             fet = {
                 'name':                f'{parameters["spiceprefix"]}{parameters["name"]}',
+                'model':               model_name,
                 'type':                fettype,
                 'location':            [x_coord, y_coord],
                 'rotate_clockwise':    90 * rotate,
                 'flip':                bool(flip),
                 'current_vector_name': f'@M.{Xschem3D.cell_instance_name}.{parameters["spiceprefix"]}{parameters["name"]}.M{model_name}[id]',
-                'currents':            []
+                'currents':            [],
+                'gatebody_percentages':[]
             }
             fets.append(fet)
         return fets
@@ -276,6 +278,38 @@ class Xschem3D:
         )
 
 
+    def get_instance_ports_from_netlist(self, instance_name, model_name):
+        filename = self.netlist_filename()
+        with open(filename, 'r') as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith('+') or line.startswith('*'):
+                    continue
+
+                tokens = line.split()
+                if tokens[0] == instance_name:
+                    if model_name not in tokens:
+                        raise ValueError(
+                            f"Line for instance '{instance_name}' does not contain model '{model_name}':\n  {line}"
+                        )
+                    model_idx = tokens.index(model_name)
+                    ports = tokens[1:model_idx]
+                    return ports
+
+        raise ValueError(f"Instance '{instance_name}' not found in netlist '{filename}'")
+
+
+    def calculate_gatebody_percentages(self, gate_voltages, fettype):
+        def clamp(a, b, c):
+            return max(a, min(b, c))
+        if fettype == 'nfet':
+            return [(t, clamp(0, v/self.vdd, 1)) for (t, v) in gate_voltages]
+        elif fettype == 'pfet':
+            return [(t, clamp(0, (self.vdd-v)/self.vdd, 1)) for (t, v) in gate_voltages]
+        else:
+            raise ValueError(f"Unsupported fettype '{fettype}'. Use 'nfet' or 'pfet'.")
+
+
     def parse_simdata_file(filename):
         times = []
         datasets = []
@@ -318,6 +352,11 @@ class Xschem3D:
             self.nets[label]['voltages'] = Xschem3D._prune_redundant(list(zip(times[i], data[i])))
         for i in range(len(self.fets)):
             self.fets[i]['currents'] = Xschem3D._prune_redundant(list(zip(times[i+len(net_names)], data[i+len(net_names)])))
+            fet_port_names = self.get_instance_ports_from_netlist(self.fets[i]['name'], self.fets[i]['model'])
+            gate_name = fet_port_names[1]
+            gate_voltages = self.nets[gate_name]['voltages']
+            gatebody_percentages = self.calculate_gatebody_percentages(gate_voltages, self.fets[i]['type'])
+            self.fets[i]['gatebody_percentages'] = gatebody_percentages
 
 
     def plot_ports(self):
