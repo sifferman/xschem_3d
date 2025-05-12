@@ -28,7 +28,7 @@ Here is a D-Flip-Flop being simulated. You can see the voltage propagate as the 
     python3 -m venv ciel-venv
     ciel-venv/bin/python3 -m pip install --upgrade --no-cache-dir ciel
     export PDK_ROOT=$TOOLS/ciel-pdks
-    ciel-venv/bin/ciel enable --pdk sky130 0fe599b2afb6708d281543108caf8310912f54af
+    ciel-venv/bin/ciel enable --pdk-family sky130 0fe599b2afb6708d281543108caf8310912f54af
     ```
 
 ## Running
