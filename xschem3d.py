@@ -60,6 +60,19 @@ class Xschem3D:
         return nets
 
 
+    def xschem_symbol_params2dict(param_str):
+        result = {}
+        tokens = re.split(r'\s+', param_str.strip())
+        for token in tokens:
+            if not token:
+                continue
+            if '=' not in token:
+                raise ValueError(f"Malformed param string. Found {token}")
+            key, val = token.split('=', 1)
+            result[key] = val
+        return result
+
+
     def sch2fets(self):
         symbol_pattern = re.compile(
             r"^C\s+\{(.+?)\}\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+\{([\s\S]*?)\}$",
@@ -71,23 +84,27 @@ class Xschem3D:
 
         fets = []
         for match in symbol_pattern.finditer(content):
-            symbol_name = match.group(1)
+            symbol_path = match.group(1)
             x_coord     = int(match.group(2))
             y_coord     = int(match.group(3))
             rotate      = int(match.group(4))
             flip        = int(match.group(5))
-            if 'pfet' in symbol_name.lower():
+            parameters  = Xschem3D.xschem_symbol_params2dict(match.group(6))
+            if 'pfet' in symbol_path.lower():
                 fettype = 'pfet'
-            elif 'nfet' in symbol_name.lower():
+            elif 'nfet' in symbol_path.lower():
                 fettype = 'nfet'
             else:
                 continue
+            model_name = symbol_path.split('.sym')[0].replace('/', '__')
             fet = {
-                'type':              fettype,
-                'location':          [x_coord, y_coord],
-                'rotate_clockwise':  90 * rotate,
-                'flip':              bool(flip),
-                'currents':          []
+                'name':                f'{parameters["spiceprefix"]}{parameters["name"]}',
+                'type':                fettype,
+                'location':            [x_coord, y_coord],
+                'rotate_clockwise':    90 * rotate,
+                'flip':                bool(flip),
+                'current_vector_name': f'@M.{Xschem3D.cell_instance_name}.{parameters["spiceprefix"]}{parameters["name"]}.M{model_name}[id]',
+                'currents':            []
             }
             fets.append(fet)
         return fets
@@ -110,29 +127,11 @@ class Xschem3D:
     def schematic_basename(self):
         return os.path.basename(self.schematic_filename)
 
-    def svg_filename(self):
-        extensionless_name, _ = os.path.splitext(self.schematic_basename())
-        filename = os.path.join(self.build_dir, extensionless_name + '.svg')
-        return filename
-
     def xschemrc_filename(pdk="sky130A"):
         pdk_root = os.getenv('PDK_ROOT')
         if not pdk_root:
             raise EnvironmentError("PDK_ROOT environment variable is not set.")
         return os.path.join(os.getenv('PDK_ROOT'), f'{pdk}/libs.tech/xschem/xschemrc')
-
-    def generate_svg(self):
-        export_dir_path = os.path.dirname(self.svg_filename())
-        os.makedirs(export_dir_path, exist_ok=True)
-
-        subprocess.run(
-            f"SVG_NAME=\"{self.svg_filename()}\" "
-            f"SCH_NAME=\"{self.schematic_filename}\" "
-            f"xschem --rcfile={Xschem3D.xschemrc_filename(self.pdk)}"
-            f"       --no_x "
-            f"       --script xschem/generate_svg.tcl"
-            f"       --log \"{self.svg_filename()}.log\"",
-            text=True, shell=True)
 
 
     def netlist_filename(self):
@@ -248,9 +247,11 @@ class Xschem3D:
             file.write(f'\n')
             file.write(f'{Xschem3D.cell_instance_name} {" ".join(self.all_ports())} {model_name}\n')
             file.write(f'\n')
+            file.write(f'.options savecurrents\n')
+            file.write(f'\n')
             file.write(f'.control\n')
             file.write(f'    tran {self.time_precision} {self.tran_end_time()}\n')
-            file.write(f'    wrdata {self.simdata_filename()} {" ".join(self.ngspice_formatted_net_names())}\n')
+            file.write(f'    wrdata {self.simdata_filename()} {" ".join(self.ngspice_formatted_net_names())} {" ".join(fet["current_vector_name"] for fet in self.fets)}\n')
             file.write(f'    exit\n')
             file.write(f'.endc\n')
             file.write(f'\n')
@@ -290,31 +291,33 @@ class Xschem3D:
         return np.array(times).T, np.array(datasets).T
 
 
-    def _prune_redundant(voltage_pairs):
-        if len(voltage_pairs) < 3:
-            return voltage_pairs
-        out = [voltage_pairs[0]]
+    def _prune_redundant(time_value_pairs):
+        if len(time_value_pairs) < 3:
+            return time_value_pairs
+        out = [time_value_pairs[0]]
         last_added_t, last_added_v = out[0]
 
-        for i in range(1, len(voltage_pairs)-1):
-            curr_t, curr_v = voltage_pairs[i]
-            next_t, next_v = voltage_pairs[i+1]
+        for i in range(1, len(time_value_pairs)-1):
+            curr_t, curr_v = time_value_pairs[i]
+            next_t, next_v = time_value_pairs[i+1]
             if not (last_added_v == curr_v == next_v):
-                out.append(voltage_pairs[i])
+                out.append(time_value_pairs[i])
                 last_added_t, last_added_v = curr_t, curr_v
 
-        out.append(voltage_pairs[-1])
+        out.append(time_value_pairs[-1])
         return out
 
 
-    def fill_net_voltages_from_simdata(self):
-        formatted_nets = self.ngspice_formatted_net_names()
-        times, voltages = Xschem3D.parse_simdata_file(self.simdata_filename())
-        for i, label in enumerate(formatted_nets):
+    def load_simdata(self):
+        net_names = self.ngspice_formatted_net_names()
+        times, data = Xschem3D.parse_simdata_file(self.simdata_filename())
+        for i, label in enumerate(net_names):
             # remove instance name
             while '.' in label:
                 label = label.split('.', 1)[1]
-            self.nets[label]['voltages'] = Xschem3D._prune_redundant(list(zip(times[i], voltages[i])))
+            self.nets[label]['voltages'] = Xschem3D._prune_redundant(list(zip(times[i], data[i])))
+        for i in range(len(self.fets)):
+            self.fets[i]['currents'] = Xschem3D._prune_redundant(list(zip(times[i+len(net_names)], data[i+len(net_names)])))
 
 
     def plot_ports(self):
@@ -355,15 +358,14 @@ if __name__=='__main__':
     #     stimulus_filename="examples/dfxtp/sky130_fd_sc_hd__dfxtp_1.stim")
     # dfxtp.generate_svg()
     # dfxtp.generate_simdata_files()
-    # dfxtp.fill_net_voltages_from_simdata()
+    # dfxtp.load_simdata()
     # dfxtp.export_json()
     # dfxtp.plot_ports()
 
     ro = Xschem3D(
         schematic_filename="examples/ro/ro.sch",
         stimulus_filename="examples/ro/ro.stim")
-    ro.generate_svg()
     ro.generate_simdata_files()
-    ro.fill_net_voltages_from_simdata()
+    ro.load_simdata()
     ro.export_json()
     ro.plot_ports()

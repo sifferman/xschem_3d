@@ -16,7 +16,7 @@ def reset_scene():
     bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
 
 
-def create_symbol_node_group(thickness, yscale):
+def create_symbol_node_group(thickness, yscale, times, currents, current_scalar, time_scalar):
     bpy.ops.mesh.primitive_cube_add()
     temp_obj = bpy.context.object
     bpy.ops.object.modifier_add(type='NODES')
@@ -43,21 +43,23 @@ def create_symbol_node_group(thickness, yscale):
     scale.location = (200, 50)
     scale.inputs["Scale"].default_value[1] = yscale
 
+    set_mat = ng.nodes.new('GeometryNodeSetMaterial')
+    set_mat.location = (300, -100)
+    set_mat.inputs['Material'].default_value = create_fet_material(times, currents, current_scalar, time_scalar)
+
     links = ng.links
     links.new(group_in.outputs["Geometry"], c2m.inputs["Curve"])
     links.new(quad.outputs["Curve"], c2m.inputs["Profile Curve"])
     links.new(c2m.outputs["Mesh"], scale.inputs["Instances"])
-    links.new(scale.outputs["Instances"], group_out.inputs["Geometry"])
+    links.new(scale.outputs["Instances"], set_mat.inputs["Geometry"])
+    links.new(set_mat.outputs["Geometry"], group_out.inputs["Geometry"])
 
-    # Remove the temporary cube object
     bpy.data.objects.remove(temp_obj, do_unlink=True)
 
     return ng
 
 
-def add_symbol(svg_path, scale, location, node_group, rotate_clockwise, flip):
-
-    # Build absolute path
+def add_symbol(svg_path, scale, location, rotate_clockwise, flip, thickness, yscale, times, currents, current_scalar, time_scalar):
     if not os.path.isabs(svg_path):
         absolute_svg_path = os.path.join(os.getcwd(), svg_path)
     else:
@@ -78,22 +80,58 @@ def add_symbol(svg_path, scale, location, node_group, rotate_clockwise, flip):
     # Lie flat
     obj.rotation_euler.x = -math.pi / 2
 
-    # Assign node group
+    node_group = create_symbol_node_group(thickness, yscale, times, currents, current_scalar, time_scalar)
     geo_mod = obj.modifiers.new(name="SymbolNodes", type='NODES')
     geo_mod.node_group = node_group
 
     return obj
 
 
-def add_emission_material(obj):
-    mat = bpy.data.materials.new(name="WireEmissionMaterial")
+def create_fet_material(times, currents, current_scalar, time_scalar):
+    mat = bpy.data.materials.new(name="FetMaterial")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    for node in list(nodes):
+        nodes.remove(node)
+
+    output = nodes.new(type='ShaderNodeOutputMaterial')
+    output.location = (400, 0)
+
+    emission = nodes.new(type='ShaderNodeEmission')
+    emission.location = (200, 0)
+    emission.inputs['Color'].default_value = (0, 0, 0, 1) # black
+    emission.inputs['Strength'].default_value = 0.0
+    links.new(emission.outputs['Emission'], output.inputs['Surface'])
+
+    fps = bpy.context.scene.render.fps
+    for t, curr in zip(times, currents):
+        frame = int(t * time_scalar * fps)
+        red_val = min(abs(curr * current_scalar), 1.0)
+        glow_strength = curr * current_scalar * 10.0
+
+        emission.inputs['Color'].default_value[0] = red_val
+        emission.inputs['Color'].keyframe_insert(data_path='default_value', frame=frame, index=0) # red
+
+        emission.inputs['Strength'].default_value = glow_strength
+        emission.inputs['Strength'].keyframe_insert(data_path='default_value', frame=frame)
+
+        if frame > bpy.context.scene.frame_end:
+            bpy.context.scene.frame_end = frame
+
+    return mat
+
+
+def create_wire_material(obj):
+    mat = bpy.data.materials.new(name="WireMaterial")
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
     bsdf = nodes.get("Principled BSDF")
     if bsdf:
         bsdf.inputs[27].default_value = (1, 0.672734, 0.0763408, 1)
         bsdf.inputs[28].default_value = 8
-    obj.data.materials.append(mat)
+    return mat
 
 
 def add_wire(net_name, start, end, times, voltages, voltage_scalar, time_scalar):
@@ -104,9 +142,7 @@ def add_wire(net_name, start, end, times, voltages, voltage_scalar, time_scalar)
     wire = bpy.context.active_object
     wire.name = f"Wire_{net_name}_{start}_{end}"
 
-    # Set length
     wire.scale = (1, 1, length)
-
     up = mathutils.Vector((0, 0, 1))
     rot_axis = up.cross(vec)
     if rot_axis.length > 1e-6:
@@ -118,7 +154,8 @@ def add_wire(net_name, start, end, times, voltages, voltage_scalar, time_scalar)
     midpoint = (mathutils.Vector(start) + mathutils.Vector(end)) / 2
     wire.location = midpoint
 
-    add_emission_material(wire)
+    mat = create_wire_material(wire)
+    wire.data.materials.append(mat)
 
     fps = bpy.context.scene.render.fps
     for t, v in zip(times, voltages):
@@ -148,10 +185,8 @@ def enable_fog_glow():
     links.new(glare.outputs['Image'], comp.inputs['Image'])
 
 
-def generate_blender_project(nets_json, voltage_scalar, time_scalar):
+def generate_blender_project(nets_json, voltage_scalar, current_scalar, time_scalar):
     reset_scene()
-
-    ng = create_symbol_node_group(thickness=40, yscale=8)
 
     with open(nets_json, 'r') as f:
         data = json.load(f)
@@ -159,23 +194,27 @@ def generate_blender_project(nets_json, voltage_scalar, time_scalar):
     for label, info in data['nets'].items():
         if not info.get('wires') or not info.get('voltages'):
             continue
-        times, volts = zip(*info['voltages'])
+        times, voltages = zip(*info['voltages'])
         for x1, y1, x2, y2 in info['wires']:
             start = (x1, -y1, 0)
             end = (x2, -y2, 0)
-            add_wire(label, start, end, times, volts,
+            add_wire(label, start, end, times, voltages,
                      voltage_scalar=voltage_scalar,
                      time_scalar=time_scalar)
 
     for fet in data['fets']:
+        times, currents = zip(*fet['currents'])
         add_symbol(svg_path=f'blender/{fet.get("type")}.svg',
                    scale=450, location=fet.get('location'),
-                   node_group=ng, rotate_clockwise=fet.get('rotate_clockwise'),
-                   flip=fet.get('flip'))
+                   rotate_clockwise=fet.get('rotate_clockwise'),
+                   flip=fet.get('flip'),
+                   thickness=40, yscale=8,
+                   times=times, currents=currents,
+                   current_scalar=current_scalar, time_scalar=time_scalar)
 
     enable_fog_glow()
 
 
 if __name__ == '__main__':
     nets_json = sys.argv[-1]
-    generate_blender_project(nets_json, voltage_scalar=3.0, time_scalar=5e9)
+    generate_blender_project(nets_json, voltage_scalar=3.0, current_scalar=1e3, time_scalar=5e9)
